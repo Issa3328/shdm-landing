@@ -1,0 +1,22 @@
+SHDM Landingpage – Projekt
+==========================
+
+Was die Seite macht:
+  Erzeugt pro Teilnehmer:in eine ID (10 Zeichen) und leitet sofort weiter zu
+  https://www.surveymonkey.ca/r/5C7MWMD?session=<ID>
+  Die ID wird zusätzlich in Supabase (Tabelle study_events, flow = "landing") gespeichert.
+
+Variante A – Vercel (wie deine anderen Projekte)
+  1. vercel.com → "Add New…" → "Project"
+  2. Diesen Ordner hochladen bzw. über GitHub importieren
+  3. Vercel erkennt "Vite" automatisch → "Deploy"
+  4. Der Link, den Vercel anzeigt, ist der STARTLINK der Studie.
+
+Variante B – ohne Installation (Drag & Drop)
+  1. app.netlify.com/drop öffnen
+  2. Den Ordner "dist" hineinziehen
+  3. Fertig – der angezeigte Link ist der Startlink.
+
+Link zu SurveyMonkey ändern:
+  Datei src/App.jsx → Zeile mit SURVEY_START_URL
+  (danach neu veröffentlichen; bei Variante B vorher "npm install" und "npm run build")
