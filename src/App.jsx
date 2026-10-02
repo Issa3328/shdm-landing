@@ -29,26 +29,47 @@ function makeId(len = 10) {
   }
 }
 
-function getParticipantId() {
-  let id = "";
-  try { id = localStorage.getItem(ID_KEY) || ""; } catch {}
-  if (!id) { try { id = sessionStorage.getItem(ID_KEY) || ""; } catch {} }
-  if (!id) id = makeId();
-  try { localStorage.setItem(ID_KEY, id); } catch {}
-  try { sessionStorage.setItem(ID_KEY, id); } catch {}
-  return id;
+// Accepts only real IDs. Empty values and unresolved survey placeholders
+// (e.g. "[session_value]", "{{...}}", "session") are treated as missing.
+function cleanId(v) {
+  const s = (v || "").trim().replace(/^\[|\]$/g, "").trim();
+  if (!s || s.length > 64) return "";
+  if (/[[\]{}<>\s]/.test(s)) return "";
+  if (/^(session|pid)(_value)?$|^(undefined|null)$/i.test(s)) return "";
+  return s;
 }
 
+function readUrlId() {
+  try { const p = new URLSearchParams(window.location.search); return cleanId(p.get("session") || p.get("pid")); } catch { return ""; }
+}
+function readLocal()   { try { return cleanId(localStorage.getItem(ID_KEY)); }   catch { return ""; } }
+function readSession() { try { return cleanId(sessionStorage.getItem(ID_KEY)); } catch { return ""; } }
+function storeId(id) {
+  try { localStorage.setItem(ID_KEY, id); } catch {}
+  try { sessionStorage.setItem(ID_KEY, id); } catch {}
+}
+
+// Start link (before the survey): URL parameter > same tab (refresh) > new ID.
+// localStorage is deliberately NOT used here, so a second participant on the
+// same device does not inherit the previous participant's ID.
+function resolveStartId() {
+  let id = readUrlId(), source = "url";
+  if (!id) { id = readSession(); source = "tab"; }
+  if (!id) { id = makeId(); source = "new"; }
+  storeId(id);
+  return { id, source };
+}
+
+// Links coming back from the survey: URL parameter > this browser > this tab.
+// If nothing is found, the fallback ID is stored so a refresh keeps it
+// (and therefore also keeps the same condition).
 function findParticipantId() {
-  const clean = v => (v || "").trim().replace(/^\[|\]$/g, "");
-  let id = "";
-  try { const p = new URLSearchParams(window.location.search); id = clean(p.get("session") || p.get("pid")); } catch {}
-  if (id) return { id, source: "url" };
-  try { id = clean(localStorage.getItem(ID_KEY)); } catch {}
-  if (id) return { id, source: "browser" };
-  try { id = clean(sessionStorage.getItem(ID_KEY)); } catch {}
-  if (id) return { id, source: "tab" };
-  return { id: "unknown-" + makeId(8), source: "missing" };
+  let id = readUrlId(), source = "url";
+  if (!id) { id = readLocal();   source = "browser"; }
+  if (!id) { id = readSession(); source = "tab"; }
+  if (!id) { id = "unknown-" + makeId(8); source = "missing"; }
+  storeId(id);
+  return { id, source };
 }
 
 function assignCondition(id) {
@@ -57,7 +78,18 @@ function assignCondition(id) {
   return CONDITIONS[(h >>> 0) % CONDITIONS.length];
 }
 
+// Link previews (Slack, Teams, WhatsApp, iMessage …) and crawlers open the page
+// headless. They must not create participant rows in the database.
+function isBot() {
+  try {
+    if (navigator.webdriver) return true;
+    return /headless|bot\b|bot\/|crawl|spider|preview|slurp|facebookexternalhit|whatsapp\/|vercel-screenshot|lighthouse/i
+      .test(navigator.userAgent || "");
+  } catch { return false; }
+}
+
 function logEvent(participantId, event, fields = {}) {
+  if (isBot()) return;
   const cond = fields.condition ? CONDITIONS.find(c => c.flow === fields.condition) : null;
   const [visibility, automation] = cond ? cond.flow.split("_") : [null, null];
   try {
@@ -81,9 +113,9 @@ function logEvent(participantId, event, fields = {}) {
 }
 
 function startRoute() {
-  const id = getParticipantId();
+  const { id, source } = resolveStartId();
   const target = `${SURVEY_START_URL}?session=${encodeURIComponent(id)}`;
-  logEvent(id, "landing_redirect", { details: { url: target } });
+  logEvent(id, "landing_redirect", { details: { url: target, participant_source: source } });
   return target;
 }
 
@@ -98,7 +130,7 @@ function prototypeRoute(flow) {
 
 function goRoute() {
   const { id, source } = findParticipantId();
-  const cond = id.startsWith("unknown") ? CONDITIONS[Math.floor(Math.random() * CONDITIONS.length)] : assignCondition(id);
+  const cond = assignCondition(id); // deterministic: same ID -> same condition, also after a refresh
   const target = `${cond.url}/?session=${encodeURIComponent(id)}`;
   logEvent(id, "condition_assigned", { page: "go", target: cond.flow, condition: cond.flow, details: { url: target, participant_source: source } });
   return target;
